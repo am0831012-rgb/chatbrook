@@ -1,0 +1,65 @@
+name: Build Chatbrook AAB
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Initialize Capacitor Android project
+        run: |
+          mkdir -p www
+          if [ -f index.html ]; then cp index.html www/index.html; fi
+          if [ ! -f www/index.html ]; then
+            echo "<!doctype html><html><head><meta charset='utf-8'><title>Chatbrook</title></head><body><h1>Chatbrook</h1></body></html>" > www/index.html
+          fi
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init "Chatbrook" "com.chatbrook.app" --web-dir="www"
+          npx cap add android
+          npx cap sync android
+
+      - name: Decode Keystore if provided
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+
+      - name: Build Signed or Release AAB
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          if [ -f app/release.keystore ]; then
+            ./gradlew bundleRelease \
+              -Pandroid.injected.signing.store.file=release.keystore \
+              -Pandroid.injected.signing.store.password="${{ secrets.KEYSTORE_PASSWORD }}" \
+              -Pandroid.injected.signing.key.alias="${{ secrets.KEY_ALIAS }}" \
+              -Pandroid.injected.signing.key.password="${{ secrets.KEY_PASSWORD }}"
+          else
+            ./gradlew bundleRelease
+          fi
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatbrook-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          
